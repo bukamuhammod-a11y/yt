@@ -174,33 +174,27 @@ fun FullYouTubeWebView(
                         }
 
                         @JavascriptInterface
-                        fun onVideoStatus(hasVideo: Boolean, isPlaying: Boolean, title: String, url: String) {
+                        fun onVideoStatus(
+                            onWatch: Boolean,
+                            isPlaying: Boolean,
+                            positionSec: Float,
+                            durationSec: Float,
+                            title: String,
+                            channel: String,
+                            url: String
+                        ) {
                             post {
-                                onVideoDetected(hasVideo, title, url)
-                                val state = if (isPlaying) PlaybackState.PLAYING else PlaybackState.PAUSED
+                                onVideoDetected(onWatch, title, url)
                                 val videoId = YouTubeCatalogExtract(url)
-                                PlayerManager.updateFromWebView(
-                                    state = state,
-                                    positionSec = 0f,
-                                    durationSec = 100f
+                                PlayerManager.updateMainWebViewWatchState(
+                                    onWatch = onWatch,
+                                    videoId = videoId,
+                                    isPlaying = isPlaying,
+                                    positionSec = positionSec,
+                                    durationSec = durationSec,
+                                    title = title,
+                                    channel = channel
                                 )
-                                if (hasVideo && videoId.isNotEmpty()) {
-                                    val cleanTitle = if (title.contains("- YouTube")) {
-                                        title.replace("- YouTube", "").trim()
-                                    } else {
-                                        title.trim()
-                                    }
-                                    PlayerManager.updateCurrentVideoFromWebView(
-                                        YouTubeVideo(
-                                            id = videoId,
-                                            title = cleanTitle.ifEmpty { "YouTube Video" },
-                                            channel = "YouTube",
-                                            durationText = "Live / Video",
-                                            durationSeconds = 300,
-                                            category = "YouTube"
-                                        )
-                                    )
-                                }
                             }
                         }
                     },
@@ -220,21 +214,7 @@ fun FullYouTubeWebView(
                     // --- Real YouTube Ad-Blocker at Network Layer ---
                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                         val url = request?.url?.toString() ?: return super.shouldInterceptRequest(view, request)
-                        val lower = url.lowercase()
-                        if (lower.contains("doubleclick.net") ||
-                            lower.contains("googleads.g.doubleclick.net") ||
-                            lower.contains("googlesyndication.com") ||
-                            lower.contains("adservice.google") ||
-                            lower.contains("googleadservices.com") ||
-                            lower.contains("youtube.com/pagead/") ||
-                            lower.contains("youtube.com/pcs/activeview") ||
-                            lower.contains("youtube.com/api/stats/ads") ||
-                            lower.contains("youtube.com/ptracking") ||
-                            lower.contains("get_midroll_info") ||
-                            lower.contains("get_ad_tags") ||
-                            lower.contains("youtubei/v1/player/ad_break") ||
-                            lower.contains("youtubei/v1/att/")
-                        ) {
+                        if (isYouTubeAdRequest(url)) {
                             return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
                         }
                         return super.shouldInterceptRequest(view, request)
@@ -314,6 +294,13 @@ fun FullYouTubeWebView(
                         }
                     }
 
+                    override fun onCommandLoadVideoWithTime(videoId: String, startSeconds: Int) {
+                        post {
+                            val timeParam = if (startSeconds > 2) "&t=${startSeconds}s" else ""
+                            loadUrl("https://m.youtube.com/watch?v=$videoId$timeParam")
+                        }
+                    }
+
                     override fun onCommandNext() {
                         post {
                             evaluateJavascript(
@@ -385,7 +372,24 @@ fun FullYouTubeWebView(
     }
 }
 
-private fun injectEarlyAdBlockScript(webView: WebView?) {
+internal fun isYouTubeAdRequest(url: String): Boolean {
+    val lower = url.lowercase()
+    return lower.contains("doubleclick.net") ||
+        lower.contains("googleads.g.doubleclick.net") ||
+        lower.contains("googlesyndication.com") ||
+        lower.contains("adservice.google") ||
+        lower.contains("googleadservices.com") ||
+        lower.contains("youtube.com/pagead/") ||
+        lower.contains("youtube.com/pcs/activeview") ||
+        lower.contains("youtube.com/api/stats/ads") ||
+        lower.contains("youtube.com/ptracking") ||
+        lower.contains("get_midroll_info") ||
+        lower.contains("get_ad_tags") ||
+        lower.contains("youtubei/v1/player/ad_break") ||
+        lower.contains("youtubei/v1/att/")
+}
+
+internal fun injectEarlyAdBlockScript(webView: WebView?) {
     val js = """
         (function() {
             if (window.__ytEarlyAdBlockInjected) return;
@@ -505,7 +509,7 @@ private fun injectEarlyAdBlockScript(webView: WebView?) {
     webView?.evaluateJavascript(js, null)
 }
 
-private fun injectAntiBotAndBackgroundScript(webView: WebView?) {
+internal fun injectAntiBotAndBackgroundScript(webView: WebView?) {
     injectEarlyAdBlockScript(webView)
     val js = """
         (function() {
@@ -620,8 +624,9 @@ private fun injectAntiBotAndBackgroundScript(webView: WebView?) {
                     var url = window.location.href;
                     var isWatch = url.indexOf('/watch') !== -1 || url.indexOf('/shorts/') !== -1;
                     var video = document.querySelector('video');
-                    var isPlaying = video ? (!video.paused && !video.ended) : false;
-                    var hasVideo = isWatch || (video !== null);
+                    var isPlaying = (isWatch && video) ? (!video.paused && !video.ended) : false;
+                    var pos = (isWatch && video && !isNaN(video.currentTime)) ? video.currentTime : 0;
+                    var dur = (isWatch && video && !isNaN(video.duration) && isFinite(video.duration)) ? video.duration : 0;
 
                     // --- Ultra-Fast Video Ad Skipper & Fallback Cleaner ---
                     try {
@@ -645,8 +650,14 @@ private fun injectAntiBotAndBackgroundScript(webView: WebView?) {
                         title = titleEl.innerText;
                     }
 
+                    var channel = 'YouTube';
+                    var chEl = document.querySelector('ytm-slim-owner-renderer .slim-owner-channel-name, .slim-owner-icon-and-title .yt-core-attributed-string, #owner-name, ytm-slim-owner-renderer h3');
+                    if (chEl && chEl.innerText) {
+                        channel = chEl.innerText;
+                    }
+
                     if (window.AndroidBridge && window.AndroidBridge.onVideoStatus) {
-                        window.AndroidBridge.onVideoStatus(hasVideo, isPlaying, title, url);
+                        window.AndroidBridge.onVideoStatus(isWatch, isPlaying, pos, dur, title, channel, url);
                     }
                 }, 200);
             }
@@ -655,7 +666,7 @@ private fun injectAntiBotAndBackgroundScript(webView: WebView?) {
     webView?.evaluateJavascript(js, null)
 }
 
-private fun YouTubeCatalogExtract(url: String): String {
+internal fun YouTubeCatalogExtract(url: String): String {
     return try {
         if (url.contains("v=")) {
             url.substringAfter("v=").substringBefore("&")

@@ -1,4 +1,12 @@
 <resources>
     <string name="app_name">Background YT</string>
+    <string name="mini_player_play">Play</string>
+    <string name="mini_player_pause">Pause</string>
+    <string name="mini_player_next">Next video</string>
+    <string name="mini_player_close">Close mini player</string>
+    <string name="mini_player_open_video">Return to video player</string>
+    <string name="mini_player_playing_status">Playing</string>
+    <string name="mini_player_paused_status">Paused</string>
+    <string name="mini_player_buffering_status">Buffering…</string>
 </resources>
 

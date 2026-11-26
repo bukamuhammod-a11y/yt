@@ -1,8 +1,11 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -43,8 +47,10 @@ import androidx.compose.ui.unit.sp
 import com.example.player.PlayerManager
 import com.example.ui.components.AssistiveSettingsDialog
 import com.example.ui.components.BlackScreenSaverOverlay
+import com.example.ui.components.BrowseAudioWebView
 import com.example.ui.components.EqualizerDialog
 import com.example.ui.components.FullYouTubeWebView
+import com.example.ui.components.MiniPlayerBar
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.YouTubeRed
@@ -59,6 +65,12 @@ fun MainScreen(
     val isBlackSaverActive by PlayerManager.isBlackScreenSaverActive.collectAsState()
     val isPiP by PlayerManager.isPiPActive.collectAsState()
     val isBgPlay by PlayerManager.isBackgroundPlayEnabled.collectAsState()
+    val currentVideo by PlayerManager.currentVideo.collectAsState()
+    val playbackState by PlayerManager.playbackState.collectAsState()
+    val currentPosition by PlayerManager.currentPosition.collectAsState()
+    val duration by PlayerManager.duration.collectAsState()
+    val isMiniPlayerDismissed by PlayerManager.isMiniPlayerDismissed.collectAsState()
+    val isMainOnWatchPage by PlayerManager.isMainOnWatchPage.collectAsState()
 
     var isVideoActiveOnScreen by remember { mutableStateOf(false) }
     var detectedVideoTitle by remember { mutableStateOf("YouTube Video") }
@@ -71,13 +83,17 @@ fun MainScreen(
             contentWindowInsets = if (isPiP) WindowInsets(0, 0, 0, 0) else WindowInsets.safeDrawing,
             containerColor = DarkBackground
         ) { innerPadding ->
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(if (isPiP) androidx.compose.foundation.layout.PaddingValues(0.dp) else innerPadding)
             ) {
-                // --- Full Screen YouTube View (Primary UI with no bottom bar) ---
-                Box(modifier = Modifier.fillMaxSize()) {
+                // --- Full Screen YouTube View (Primary browsing & watch canvas) ---
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
                     FullYouTubeWebView(
                         onVideoDetected = { hasVideo, title, _ ->
                             isVideoActiveOnScreen = hasVideo
@@ -86,6 +102,9 @@ fun MainScreen(
                             }
                         }
                     )
+
+                    // Headless 1.dp browse-handoff audio WebView
+                    BrowseAudioWebView()
 
                     // --- Floating Quick Action Icons on Right Edge (Hidden in PiP) ---
                     if (!isPiP) {
@@ -186,6 +205,37 @@ fun MainScreen(
                                 )
                             }
                         }
+                    }
+                }
+
+                // --- Compact Docked Mini-Player at Bottom While Browsing ---
+                val activeVideo = currentVideo
+                AnimatedVisibility(
+                    visible = !isPiP && !isMiniPlayerDismissed && activeVideo != null,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(durationMillis = 220)
+                    ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(durationMillis = 180)
+                    ) + fadeOut(animationSpec = tween(durationMillis = 150))
+                ) {
+                    if (activeVideo != null) {
+                        MiniPlayerBar(
+                            video = activeVideo,
+                            playbackState = playbackState,
+                            currentPositionSec = currentPosition,
+                            durationSec = duration,
+                            onTogglePlayPause = { PlayerManager.togglePlayPause() },
+                            onNext = { PlayerManager.next() },
+                            onClose = { PlayerManager.dismissMiniPlayer() },
+                            onOpenVideo = {
+                                if (!isMainOnWatchPage) {
+                                    PlayerManager.openCurrentVideoInMainPlayer()
+                                }
+                            }
+                        )
                     }
                 }
             }
