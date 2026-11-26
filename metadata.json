@@ -1,0 +1,7 @@
+{
+  "name": "Background YT",
+  "description": "Background YouTube player with screen-off playback and persistent AssistiveTouch floating quick controls for volume, brightness, and screen recording.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
